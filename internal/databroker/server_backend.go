@@ -792,6 +792,26 @@ func (srv *backendServer) setupRequiredIndex(ctx context.Context, backend storag
 		return err
 	}
 
+	// The token handler is the only thing that removes refresh tokens, so a re-authorization,
+	// a failed delete, or a client that simply stops refreshing pins the record forever. The
+	// TTL runs from the last write and rotation rewrites the record, so an active client is
+	// never affected, only one idle past the TTL, which then re-authenticates.
+	mcpRefreshTokenCapacity := uint64(10000)
+	if err := backend.SetOptions(ctx, "type.googleapis.com/oauth21.MCPRefreshToken", &databrokerpb.Options{
+		Capacity: &mcpRefreshTokenCapacity,
+		Ttl:      durationpb.New(30 * 24 * time.Hour),
+	}); err != nil {
+		return err
+	}
+
+	// Authorization requests are deleted when the code is redeemed, but a flow the user
+	// abandons at the IdP leaves the record behind with nothing else to clean it up.
+	if err := backend.SetOptions(ctx, "type.googleapis.com/oauth21.AuthorizationRequest", &databrokerpb.Options{
+		Ttl: durationpb.New(time.Hour),
+	}); err != nil {
+		return err
+	}
+
 	return nil
 }
 
